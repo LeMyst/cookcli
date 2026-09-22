@@ -54,11 +54,13 @@ pub fn preamble() -> ApiPreamble {
             ),
             note(
                 "CORS",
-                "`GET` is allowed from any origin. A cross-origin request that would modify \
-                 recipes is refused with `403` unless the server was started with a matching \
-                 `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other \
-                 non-browser clients — are unaffected. `content-type` is always an allowed \
-                 request header.",
+                "No other origin is allowed by default, so a page on another site cannot read \
+                 a response. `--cors-origin <ORIGIN>` lets that origin read and write; \
+                 `--cors-origin '*'` lets any origin read. A cross-origin request that would \
+                 modify recipes is refused with `403` unless the server was started with a \
+                 matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` \
+                 and other non-browser clients — are unaffected. `content-type` is always an \
+                 allowed request header.",
             ),
             note("Request size limit", "1 MB."),
             note(

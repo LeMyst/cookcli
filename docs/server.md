@@ -26,7 +26,7 @@ cook server [OPTIONS] [BASE_PATH]
 | `--host [<ADDRESS>]` | Allow connections from external hosts (default: localhost only). Optionally bind to a specific address. |
 | `-p, --port <PORT>` | Port number (default: 9080) |
 | `--open` | Automatically open the web interface in your default browser |
-| `--cors-origin <ORIGIN>` | Origin allowed to make cross-origin browser requests. Repeatable. `*` for any origin (default). |
+| `--cors-origin <ORIGIN>` | Origin allowed to make cross-origin browser requests. Repeatable. `*` lets any origin read, but not write. Default: none. |
 | `--cors-allow-credentials` | Allow cross-origin requests to carry cookies and credentials. Requires an explicit `--cors-origin`. |
 | `--no-csrf-check` | Disable same-origin enforcement on requests that modify recipes. |
 
@@ -56,7 +56,7 @@ cook server --cors-origin https://cook.example.com
 
 - By default, only accepts connections from localhost
 - Use `--host` on trusted networks only — recipes become accessible to anyone on the network
-- Cross-origin browser requests can read (`GET`) from any origin by default, but one that would modify recipes is refused with `403`. Naming origins with `--cors-origin` lets those origins write too, so a page you have not listed cannot change your recipes. Requests with no `Origin` header — `curl`, scripts, anything that is not a browser — are unaffected. See [the API reference](api.md).
+- By default no other website can use the server from your browser: responses carry no CORS headers, so a page on another origin cannot read them, and a cross-origin request that would modify recipes is refused with `403`. Naming origins with `--cors-origin` lets those origins read and write. `--cors-origin '*'` lets every website you visit read your recipes, pantry and shopping list, though not change them. Requests with no `Origin` header — `curl`, scripts, anything that is not a browser — are unaffected. See [the API reference](api.md).
 - Behind a reverse proxy that rewrites `Host`, pass `--cors-origin` with the public origin (for example `--cors-origin https://cook.example.com`). The same-origin check reads the real `Host` header and ignores `X-Forwarded-Host`, which any client can set freely.
 - `--no-csrf-check` turns that same-origin enforcement off entirely, for both the API and the web UI's new-recipe form. Its former spelling, `--no-cors`, still works.
 - The web interface supports recipe browsing, scaling, search, and shopping list management

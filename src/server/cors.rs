@@ -19,8 +19,11 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 /// Which origins may make cross-origin requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CorsOrigins {
-    /// `--cors-origin '*'`, or no `--cors-origin` at all. Read-only: see
-    /// [`CorsConfig::methods`].
+    /// No `--cors-origin` at all: no other site may read a response. The
+    /// default, because nearly every route answers with the user's own data —
+    /// recipes, pantry, shopping list, the cook.md account.
+    None,
+    /// `--cors-origin '*'`. Read-only: see [`CorsConfig::methods`].
     Any,
     /// One or more explicit origins, in the order given on the command line.
     List(Vec<HeaderValue>),
@@ -46,7 +49,9 @@ impl CorsConfig {
             );
         }
 
-        let origins = if origins.is_empty() || wildcard {
+        let origins = if origins.is_empty() {
+            CorsOrigins::None
+        } else if wildcard {
             CorsOrigins::Any
         } else {
             let parsed = origins
@@ -56,10 +61,11 @@ impl CorsConfig {
             CorsOrigins::List(parsed)
         };
 
-        if allow_credentials && matches!(origins, CorsOrigins::Any) {
+        if allow_credentials && !matches!(origins, CorsOrigins::List(_)) {
             bail!(
-                "--cors-allow-credentials requires explicit --cors-origin values; \
-                 browsers reject credentialed requests against a wildcard origin"
+                "--cors-allow-credentials requires explicit --cors-origin values: it only \
+                 applies to origins you name, and browsers reject credentialed requests \
+                 against a wildcard origin"
             );
         }
 
@@ -71,11 +77,13 @@ impl CorsConfig {
 
     /// The methods this policy allows cross-origin.
     ///
-    /// A wildcard origin means *any* page in the user's browser can reach the
-    /// server, so it gets read-only access. Naming an origin is an explicit
-    /// statement of trust, and unlocks the mutating routes.
+    /// With no origin named there is nothing to allow. A wildcard origin means
+    /// *any* page in the user's browser can reach the server, so it gets
+    /// read-only access. Naming an origin is an explicit statement of trust,
+    /// and unlocks the mutating routes.
     fn methods(&self) -> Vec<Method> {
         match &self.origins {
+            CorsOrigins::None => Vec::new(),
             CorsOrigins::Any => vec![Method::GET],
             CorsOrigins::List(_) => {
                 vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]
@@ -92,6 +100,10 @@ impl CorsConfig {
     /// — browsers permit them regardless.
     pub fn layer(&self) -> CorsLayer {
         let allow_origin = match &self.origins {
+            // An empty list matches no origin, so no response carries
+            // `Access-Control-Allow-Origin` and the browser shows none of them
+            // to another site.
+            CorsOrigins::None => AllowOrigin::list([]),
             CorsOrigins::Any => AllowOrigin::any(),
             CorsOrigins::List(list) => AllowOrigin::list(list.iter().cloned()),
         };
@@ -106,9 +118,10 @@ impl CorsConfig {
     /// Whether a request with this method, these headers and this `Host` may
     /// modify recipes.
     ///
-    /// `allow_methods` cannot express this. `POST` is a CORS-safelisted method,
-    /// so a browser never consults `Access-Control-Allow-Methods` for it —
-    /// only a server-side check makes the wildcard default actually read-only.
+    /// The CORS headers cannot express this. `POST` is a CORS-safelisted
+    /// method, so a browser never consults `Access-Control-Allow-Methods` for
+    /// it, and sends a simple cross-origin `POST` whatever the policy says —
+    /// only a server-side check keeps other sites from writing.
     fn allows_write(&self, method: &Method, headers: &HeaderMap, host: &str) -> bool {
         if *method == Method::GET || *method == Method::HEAD || *method == Method::OPTIONS {
             return true;
@@ -126,7 +139,7 @@ impl CorsConfig {
 
     fn lists_origin(&self, origin: &str) -> bool {
         match &self.origins {
-            CorsOrigins::Any => false,
+            CorsOrigins::None | CorsOrigins::Any => false,
             CorsOrigins::List(list) => list
                 .iter()
                 .any(|listed| listed.as_bytes() == origin.as_bytes()),
@@ -318,22 +331,17 @@ mod tests {
     }
 
     #[test]
-    fn no_flag_defaults_to_any() {
+    fn no_flag_allows_no_origin() {
         let config = CorsConfig::from_args(&[], false).expect("valid");
-        assert_eq!(config.origins, CorsOrigins::Any);
+        assert_eq!(config.origins, CorsOrigins::None);
         assert!(!config.allow_credentials);
+        assert_eq!(config.methods(), Vec::<Method>::new());
     }
 
     #[test]
-    fn explicit_wildcard_is_any() {
+    fn explicit_wildcard_is_any_and_allows_only_get() {
         let config = CorsConfig::from_args(&origins(&["*"]), false).expect("valid");
         assert_eq!(config.origins, CorsOrigins::Any);
-        assert_eq!(config.methods(), vec![Method::GET]);
-    }
-
-    #[test]
-    fn any_allows_only_get() {
-        let config = CorsConfig::from_args(&[], false).expect("valid");
         assert_eq!(config.methods(), vec![Method::GET]);
     }
 
@@ -366,15 +374,18 @@ mod tests {
     }
 
     #[test]
-    fn credentials_with_wildcard_is_rejected() {
+    fn credentials_without_an_origin_are_rejected() {
         let err = CorsConfig::from_args(&[], true).expect_err("must reject");
         assert!(
             err.to_string().contains("--cors-origin"),
             "error must point at the fix: {err}"
         );
+    }
 
-        // The spelling a user actually types, and the one that would panic
-        // tower-http at request time if this guard ever stopped firing.
+    #[test]
+    fn credentials_with_wildcard_is_rejected() {
+        // The one that would panic tower-http at request time if this guard
+        // ever stopped firing.
         let err = CorsConfig::from_args(&origins(&["*"]), true).expect_err("must reject");
         assert!(
             err.to_string().contains("--cors-origin"),
@@ -481,8 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn layer_applies_for_wildcard() {
+    fn layer_applies_with_no_origin() {
         let config = CorsConfig::from_args(&[], false).expect("valid");
+        assert_layer_applies(&config);
+    }
+
+    #[test]
+    fn layer_applies_for_wildcard() {
+        let config = CorsConfig::from_args(&origins(&["*"]), false).expect("valid");
         assert_layer_applies(&config);
     }
 
@@ -649,19 +666,22 @@ mod tests {
     }
 
     #[test]
-    fn cross_origin_writes_are_refused_under_the_wildcard_default() {
-        // The hole this guard exists to close: POST is CORS-safelisted, so
-        // Access-Control-Allow-Methods: GET does not stop it.
-        let config = CorsConfig::from_args(&[], false).expect("valid");
-        for method in [Method::POST, Method::PUT, Method::DELETE] {
-            assert!(
-                !config.allows_write(
-                    &method,
-                    &headers_with_origin("http://evil.test"),
-                    "a.test:9080"
-                ),
-                "cross-origin {method} must be refused"
-            );
+    fn cross_origin_writes_are_refused_unless_listed() {
+        // The hole this guard exists to close: POST is CORS-safelisted, so a
+        // browser sends a simple one whatever the headers say. Neither an
+        // empty allowlist nor Access-Control-Allow-Methods: GET stops it.
+        for flags in [&[][..], &["*"][..]] {
+            let config = CorsConfig::from_args(&origins(flags), false).expect("valid");
+            for method in [Method::POST, Method::PUT, Method::DELETE] {
+                assert!(
+                    !config.allows_write(
+                        &method,
+                        &headers_with_origin("http://evil.test"),
+                        "a.test:9080"
+                    ),
+                    "cross-origin {method} must be refused with --cors-origin {flags:?}"
+                );
+            }
         }
     }
 

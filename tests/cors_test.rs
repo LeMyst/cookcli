@@ -10,14 +10,16 @@
 //! - The **write guard** exists precisely because headers cannot express its
 //!   rule: `POST` is a CORS-safelisted method, so a browser never consults
 //!   `Access-Control-Allow-Methods` before sending one — `allow_methods([GET])`
-//!   does nothing to stop a cross-origin `POST`. Under the wildcard-origin
-//!   default, `AllowOrigin::any()` also answers every preflight, including a
-//!   `POST` preflight, with `Access-Control-Allow-Origin: *`. So a test that
-//!   sends a `POST` preflight and asserts that header is absent would fail
-//!   against *correct* code — it proves nothing about whether the write itself
-//!   is refused. The only way to observe the guard is to send a real
-//!   cross-origin `POST` and check the status code it comes back with. Do not
-//!   "simplify" the write-guard tests below into preflight assertions.
+//!   does nothing to stop a cross-origin `POST`. Under `--cors-origin '*'`,
+//!   `AllowOrigin::any()` also answers every preflight, including a `POST`
+//!   preflight, with `Access-Control-Allow-Origin: *`, so a test that sends a
+//!   `POST` preflight and asserts that header is absent would fail against
+//!   *correct* code. Under the default, where no preflight succeeds, a simple
+//!   cross-origin `POST` needs none at all. Either way a preflight proves
+//!   nothing about whether the write itself is refused. The only way to
+//!   observe the guard is to send a real cross-origin `POST` and check the
+//!   status code it comes back with. Do not "simplify" the write-guard tests
+//!   below into preflight assertions.
 
 #![cfg(feature = "server")]
 
@@ -221,14 +223,29 @@ async fn get_with_origin(server: &ServerGuard, path: &str, origin: &str) -> Resp
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn default_policy_preflight_get_is_wide_open() {
+async fn default_policy_preflight_grants_no_origin() {
     let server = start_server(&[]).await;
+
+    for method in ["GET", "POST"] {
+        let headers = preflight(&server, "http://evil.test", method).await;
+        assert_eq!(
+            header(&headers, "access-control-allow-origin"),
+            None,
+            "with no --cors-origin, a {method} preflight must allow no origin, \
+             got headers: {headers:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn wildcard_policy_preflight_get_is_wide_open() {
+    let server = start_server(&["--cors-origin", "*"]).await;
     let headers = preflight(&server, "http://evil.test", "GET").await;
 
     assert_eq!(
         header(&headers, "access-control-allow-origin").as_deref(),
         Some("*"),
-        "default policy must allow any origin for GET, got headers: {headers:?}"
+        "--cors-origin '*' must allow any origin for GET, got headers: {headers:?}"
     );
     let methods = header(&headers, "access-control-allow-methods");
     assert!(
@@ -238,8 +255,8 @@ async fn default_policy_preflight_get_is_wide_open() {
 }
 
 #[tokio::test]
-async fn default_policy_preflight_put_is_not_in_allowed_methods() {
-    let server = start_server(&[]).await;
+async fn wildcard_policy_preflight_put_is_not_in_allowed_methods() {
+    let server = start_server(&["--cors-origin", "*"]).await;
     let headers = preflight(&server, "http://evil.test", "PUT").await;
 
     // Deliberately not asserting anything about access-control-allow-origin
@@ -320,11 +337,26 @@ async fn default_policy_cross_origin_post_is_refused_with_403() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "cross-origin POST under the wildcard default must be refused, got {status}: {body}"
+        "cross-origin POST under the default policy must be refused, got {status}: {body}"
     );
     assert!(
         body.contains("--cors-origin"),
         "refusal body must tell the operator how to fix it, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn wildcard_policy_cross_origin_post_is_refused_with_403() {
+    // `*` opens reads only. Naming an origin is what unlocks writes.
+    let server = start_server(&["--cors-origin", "*"]).await;
+    let resp = post_pantry_add(&server, Some("http://evil.test")).await;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "cross-origin POST under --cors-origin '*' must be refused, got {status}: {body}"
     );
 }
 
@@ -391,15 +423,41 @@ async fn default_policy_post_without_origin_is_not_blocked() {
 }
 
 #[tokio::test]
-async fn default_policy_cross_origin_get_is_allowed() {
+async fn default_policy_cross_origin_get_has_no_allow_origin() {
+    // CORS is browser-enforced: the server still answers, and it is the
+    // missing header that makes the browser withhold the body from the page.
+    // That covers every read, `/api/sync/status` and its pending login code
+    // included.
     let server = start_server(&[]).await;
+    let resp = get_with_origin(&server, "/api/menus", "http://evil.test").await;
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        header(resp.headers(), "access-control-allow-origin"),
+        None,
+        "with no --cors-origin, no response may carry access-control-allow-origin, \
+         got headers: {:?}",
+        resp.headers()
+    );
+}
+
+#[tokio::test]
+async fn wildcard_policy_cross_origin_get_is_readable() {
+    let server = start_server(&["--cors-origin", "*"]).await;
     let resp = get_with_origin(&server, "/api/menus", "http://evil.test").await;
 
     assert_eq!(
         resp.status(),
         StatusCode::OK,
-        "reads must stay open to any origin under the default policy, got {}",
+        "reads must stay open to any origin under --cors-origin '*', got {}",
         resp.status()
+    );
+    assert_eq!(
+        header(resp.headers(), "access-control-allow-origin").as_deref(),
+        Some("*"),
+        "--cors-origin '*' must let the browser show the response to any page, \
+         got headers: {:?}",
+        resp.headers()
     );
 }
 

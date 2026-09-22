@@ -99,12 +99,12 @@ pub struct ServerArgs {
 
     /// Origin allowed to make cross-origin browser requests (repeatable)
     ///
-    /// Pass once per origin, e.g. --cors-origin http://localhost:3000. Use "*"
-    /// for any origin, which is the default. Under a wildcard origin the
-    /// server answers cross-origin reads but refuses cross-origin writes with
-    /// 403; naming explicit origins lets those origins write too. "*" cannot
-    /// be combined with explicit origins. Requests with no Origin header --
-    /// curl and other non-browser clients -- are never affected.
+    /// Pass once per origin, e.g. --cors-origin http://localhost:3000. Without
+    /// it, no other site can read from or write to the server. Named origins
+    /// may read and write. "*" lets every site read your recipes, pantry and
+    /// shopping list, but refuses cross-origin writes with 403; it cannot be
+    /// combined with explicit origins. Requests with no Origin header -- curl
+    /// and other non-browser clients -- are never affected.
     #[arg(long, value_name = "ORIGIN")]
     cors_origin: Vec<String>,
 

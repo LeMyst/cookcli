@@ -8,7 +8,7 @@ Start the server with [`cook server`](server.md); every endpoint below is served
 
 - **Base URL:** `http://localhost:9080/api`
 - **Authentication:** None. Anyone who can reach the server can read and modify your recipes — think twice before using `--host` on an untrusted network.
-- **CORS:** `GET` is allowed from any origin. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
+- **CORS:** No other origin is allowed by default, so a page on another site cannot read a response. `--cors-origin <ORIGIN>` lets that origin read and write; `--cors-origin '*'` lets any origin read. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
 - **Request size limit:** 1 MB.
 - **Content type:** JSON in and out, except where noted — raw recipe text is `text/plain`.
 
