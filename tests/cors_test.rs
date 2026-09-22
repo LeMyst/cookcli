@@ -1,6 +1,8 @@
 //! End-to-end tests for `cook server`'s CORS policy: the `tower_http`
-//! `CorsLayer` built from `--cors-origin` / `--cors-allow-credentials`, and the
-//! server-side write guard in `src/server/cors.rs` that sits inside it.
+//! `CorsLayer` built from `--cors-origin` / `--cors-allow-credentials`, the
+//! server-side write guard in `src/server/cors.rs` that sits inside it, and the
+//! `TrustedOrigin` extractor that keeps a few routes from other sites even
+//! under `--cors-origin '*'`.
 //!
 //! Two mechanisms, two testing strategies:
 //!
@@ -213,6 +215,16 @@ async fn get_with_origin(server: &ServerGuard, path: &str, origin: &str) -> Resp
     Client::new()
         .get(server.url(path))
         .header(ORIGIN, origin)
+        .send()
+        .await
+        .expect("GET request")
+}
+
+/// A `GET` with no `Origin`: what `curl` sends, and what a browser sends for a
+/// same-origin read or a navigation.
+async fn get_without_origin(server: &ServerGuard, path: &str) -> Response {
+    Client::new()
+        .get(server.url(path))
         .send()
         .await
         .expect("GET request")
@@ -492,6 +504,109 @@ async fn no_csrf_check_disables_the_write_guard() {
         status,
         StatusCode::FORBIDDEN,
         "--no-csrf-check must disable the write guard entirely, got {status}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Same-origin-only routes (`TrustedOrigin`)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "sync")]
+#[tokio::test]
+async fn sync_status_refuses_other_origins_even_under_the_wildcard() {
+    // `/api/sync/status` carries a pending login's device code. A page that
+    // reads it can approve it with its own cook.md account, so `*`, which
+    // opens every other read, must not open this one. `null` is what a
+    // sandboxed iframe sends, and any page can arrange for one.
+    let server = start_server(&["--cors-origin", "*"]).await;
+
+    for origin in ["http://evil.test", "null"] {
+        let resp = get_with_origin(&server, "/api/sync/status", origin).await;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "Origin: {origin} must not read the sync status, got {status}: {body}"
+        );
+        assert!(
+            body.contains("--cors-origin"),
+            "refusal body must tell the operator how to fix it, got: {body}"
+        );
+    }
+}
+
+#[cfg(feature = "sync")]
+#[tokio::test]
+async fn sync_status_still_answers_the_web_ui_and_curl() {
+    let server = start_server(&[]).await;
+
+    let without = get_without_origin(&server, "/api/sync/status").await;
+    assert_eq!(
+        without.status(),
+        StatusCode::OK,
+        "a read with no Origin (curl, or the web UI's own same-origin fetch) must be answered"
+    );
+
+    let own_origin = server.own_origin();
+    let same = get_with_origin(&server, "/api/sync/status", &own_origin).await;
+    assert_eq!(
+        same.status(),
+        StatusCode::OK,
+        "a read carrying the server's own Origin must be answered"
+    );
+}
+
+#[cfg(feature = "sync")]
+#[tokio::test]
+async fn sync_status_answers_a_listed_origin() {
+    let server = start_server(&["--cors-origin", "http://app.test"]).await;
+    let resp = get_with_origin(&server, "/api/sync/status", "http://app.test").await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "an origin named with --cors-origin is trusted with the sign-in state"
+    );
+    assert_eq!(
+        header(resp.headers(), "access-control-allow-origin").as_deref(),
+        Some("http://app.test"),
+        "the listed origin must be able to read the answer, got headers: {:?}",
+        resp.headers()
+    );
+}
+
+#[tokio::test]
+async fn preferences_page_refuses_other_origins_under_the_wildcard() {
+    // The page shows the cook.md email. A link from another site is a
+    // navigation, which carries no `Origin`, so it still opens.
+    let server = start_server(&["--cors-origin", "*"]).await;
+
+    let cross = get_with_origin(&server, "/preferences", "http://evil.test").await;
+    assert_eq!(
+        cross.status(),
+        StatusCode::FORBIDDEN,
+        "another site must not read the Preferences page under --cors-origin '*'"
+    );
+
+    let navigation = get_without_origin(&server, "/preferences").await;
+    assert_eq!(
+        navigation.status(),
+        StatusCode::OK,
+        "opening the Preferences page must still work"
+    );
+}
+
+#[tokio::test]
+async fn no_csrf_check_lifts_the_same_origin_only_routes() {
+    let server = start_server(&["--no-csrf-check"]).await;
+    let resp = get_with_origin(&server, "/preferences", "http://evil.test").await;
+
+    let status = resp.status();
+    assert_ne!(
+        status,
+        StatusCode::FORBIDDEN,
+        "--no-csrf-check must lift TrustedOrigin along with the write guard, got {status}"
     );
 }
 

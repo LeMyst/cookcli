@@ -1,3 +1,4 @@
+use crate::server::cors::TrustedOrigin;
 use crate::server::AppState;
 use crate::sync::{self, device_flow, PendingDeviceFlow, SyncSession};
 use axum::{extract::State, http::StatusCode, Json};
@@ -27,7 +28,13 @@ pub struct SyncStatusResponse {
     pub reason: Option<String>,
 }
 
-pub async fn sync_status(State(state): State<Arc<AppState>>) -> Json<SyncStatusResponse> {
+/// Only for the server's own pages and named origins, even under
+/// `--cors-origin '*'`: whoever reads `pending_login.user_code` can approve it
+/// with their own cook.md account.
+pub async fn sync_status(
+    _origin: TrustedOrigin,
+    State(state): State<Arc<AppState>>,
+) -> Json<SyncStatusResponse> {
     let (logged_in, email, syncing, reason) = state.sync_status().await;
 
     let pending_login = {

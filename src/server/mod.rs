@@ -102,9 +102,10 @@ pub struct ServerArgs {
     /// Pass once per origin, e.g. --cors-origin http://localhost:3000. Without
     /// it, no other site can read from or write to the server. Named origins
     /// may read and write. "*" lets every site read your recipes, pantry and
-    /// shopping list, but refuses cross-origin writes with 403; it cannot be
-    /// combined with explicit origins. Requests with no Origin header -- curl
-    /// and other non-browser clients -- are never affected.
+    /// shopping list, but refuses cross-origin writes with 403, and still
+    /// keeps the cook.md sign-in state to named origins; it cannot be combined
+    /// with explicit origins. Requests with no Origin header -- curl and other
+    /// non-browser clients -- are never affected.
     #[arg(long, value_name = "ORIGIN")]
     cors_origin: Vec<String>,
 
@@ -115,13 +116,13 @@ pub struct ServerArgs {
     #[arg(long, default_value_t = false)]
     cors_allow_credentials: bool,
 
-    /// Disable same-origin enforcement on requests that modify recipes
+    /// Disable same-origin enforcement on writes and on the sign-in state
     ///
-    /// By default a request is rejected unless its Origin matches the Host it
-    /// was sent to, or is named by --cors-origin. This has nothing to do with
-    /// the cross-origin read policy the other --cors-* flags configure. Use it
-    /// only when a reverse proxy rewrites Host in a way that cannot be
-    /// expressed with --cors-origin. The former spelling --no-cors still works.
+    /// By default a request that modifies recipes, or reads the cook.md
+    /// sign-in state, is rejected unless its Origin matches the Host it was
+    /// sent to or is named by --cors-origin. Use it only when a reverse proxy
+    /// rewrites Host in a way that cannot be expressed with --cors-origin. The
+    /// former spelling --no-cors still works.
     #[arg(long = "no-csrf-check", alias = "no-cors", action = clap::ArgAction::SetFalse)]
     csrf_check: bool,
 }
@@ -146,7 +147,7 @@ pub async fn run(ctx: Context, args: ServerArgs) -> Result<()> {
     // fails immediately rather than after the "Listening on ..." banner.
     let cors = cors::CorsConfig::from_args(&args.cors_origin, args.cors_allow_credentials)?;
 
-    let state = build_state(ctx, args)?;
+    let state = build_state(ctx, args, cors)?;
 
     if state.url_prefix.is_empty() {
         println!("Listening on http://{addr}");
@@ -221,8 +222,8 @@ pub async fn run(ctx: Context, args: ServerArgs) -> Result<()> {
     #[cfg(feature = "sync")]
     let state_for_shutdown = state.clone();
 
-    let cors_layer = cors.layer();
-    let cors = Arc::new(cors);
+    let cors_layer = state.cors.layer();
+    let cors = Arc::clone(&state.cors);
 
     let app = app
         .with_state(state)
@@ -286,7 +287,7 @@ pub async fn run(ctx: Context, args: ServerArgs) -> Result<()> {
     Ok(())
 }
 
-fn build_state(ctx: Context, args: ServerArgs) -> Result<Arc<AppState>> {
+fn build_state(ctx: Context, args: ServerArgs, cors: cors::CorsConfig) -> Result<Arc<AppState>> {
     let base_path = ctx.base_path().to_path_buf();
 
     let path = args.base_path.as_ref().unwrap_or(&base_path);
@@ -356,6 +357,7 @@ fn build_state(ctx: Context, args: ServerArgs) -> Result<Arc<AppState>> {
         pantry_path,
         url_prefix,
         csrf_check: args.csrf_check,
+        cors: Arc::new(cors),
         checked_log_lock: Arc::new(tokio::sync::Mutex::new(())),
         shopping_list_events,
         #[cfg(feature = "sync")]
@@ -404,9 +406,12 @@ pub struct AppState {
     pub aisle_path: Option<Utf8PathBuf>,
     pub pantry_path: Option<Utf8PathBuf>,
     pub url_prefix: String,
-    /// When true, requests that modify recipes must be same-origin or come
-    /// from a `--cors-origin`. Cleared by `--no-csrf-check`.
+    /// When true, requests that modify recipes, and those behind
+    /// [`cors::TrustedOrigin`], must be same-origin or come from a
+    /// `--cors-origin`. Cleared by `--no-csrf-check`.
     pub csrf_check: bool,
+    /// The policy from `--cors-origin`, which [`cors::TrustedOrigin`] consults.
+    pub cors: Arc<cors::CorsConfig>,
     /// Serializes access to `.shopping-checked` within this process.
     /// File-level `flock` doesn't prevent two tasks in the *same* process
     /// from racing on the file (the kernel treats them as one lock owner),

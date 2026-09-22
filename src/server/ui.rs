@@ -501,7 +501,10 @@ async fn pantry_page(
     })
 }
 
+/// Shows the cook.md email, so it answers only the server's own pages and
+/// named origins, like `/api/sync/status`.
 async fn preferences_page(
+    _origin: super::cors::TrustedOrigin,
     State(state): State<Arc<AppState>>,
     Extension(lang): Extension<LanguageIdentifier>,
     Extension(features): Extension<FeatureFlags>,

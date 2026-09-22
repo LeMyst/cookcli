@@ -8,7 +8,7 @@ Start the server with [`cook server`](server.md); every endpoint below is served
 
 - **Base URL:** `http://localhost:9080/api`
 - **Authentication:** None. Anyone who can reach the server can read and modify your recipes — think twice before using `--host` on an untrusted network.
-- **CORS:** No other origin is allowed by default, so a page on another site cannot read a response. `--cors-origin <ORIGIN>` lets that origin read and write; `--cors-origin '*'` lets any origin read. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
+- **CORS:** No other origin is allowed by default, so a page on another site cannot read a response. `--cors-origin <ORIGIN>` lets that origin read and write; `--cors-origin '*'` lets any origin read, except the cook.md sign-in state (`/api/sync/status`), which answers a cross-origin request with `403` unless its origin is named. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
 - **Request size limit:** 1 MB.
 - **Content type:** JSON in and out, except where noted — raw recipe text is `text/plain`.
 
@@ -21,7 +21,7 @@ Every failure returns the same shape, with the status code carrying the meaning:
 ```
 
 - `400` — malformed input: an invalid path, a bad query parameter, or a recipe that failed to parse.
-- `403` — a cross-origin request tried to modify recipes. Start the server with `--cors-origin <ORIGIN>` to allow that origin.
+- `403` — a cross-origin request tried to modify recipes, or to read the cook.md sign-in state. Start the server with `--cors-origin <ORIGIN>` to allow that origin.
 - `404` — the recipe, menu, or pantry section does not exist, or no pantry file is configured.
 - `500` — the server could not read or write a file.
 
@@ -946,7 +946,7 @@ Sign in to CookCloud and sync recipes across devices. These four endpoints exist
 
 Current sync and login state *(requires a build with the `sync` feature)*
 
-`pending_login` is non-null while a device-code login is in progress; poll this endpoint to detect completion. `expires_in_secs` counts down to when the pending login expires. Captured live against a fresh server with no session.
+`pending_login` is non-null while a device-code login is in progress; poll this endpoint to detect completion. `expires_in_secs` counts down to when the pending login expires. A cross-origin request gets `403` unless its origin is named with `--cors-origin`; `--cors-origin '*'` is not enough, because another site that read the pending `user_code` could approve it with its own account. Captured live against a fresh server with no session.
 
 Response:
 

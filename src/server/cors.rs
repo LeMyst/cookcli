@@ -5,10 +5,11 @@
 //! pages may do with the API. The web UI itself, `curl`, and every non-browser
 //! client are unaffected by anything here.
 
+use super::AppState;
 use anyhow::{bail, Result};
 use axum::{
-    extract::{Request, State},
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
+    extract::{FromRequestParts, OriginalUri, Request, State},
+    http::{header, request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -23,7 +24,8 @@ pub enum CorsOrigins {
     /// default, because nearly every route answers with the user's own data —
     /// recipes, pantry, shopping list, the cook.md account.
     None,
-    /// `--cors-origin '*'`. Read-only: see [`CorsConfig::methods`].
+    /// `--cors-origin '*'`. Read-only, see [`CorsConfig::methods`], and never
+    /// the routes behind [`TrustedOrigin`].
     Any,
     /// One or more explicit origins, in the order given on the command line.
     List(Vec<HeaderValue>),
@@ -126,6 +128,13 @@ impl CorsConfig {
         if *method == Method::GET || *method == Method::HEAD || *method == Method::OPTIONS {
             return true;
         }
+        self.trusts_origin(headers, host)
+    }
+
+    /// Whether a request with these headers, sent to this `Host`, comes from a
+    /// page this policy trusts: the server's own, or one named with
+    /// `--cors-origin`. `'*'` names none.
+    fn trusts_origin(&self, headers: &HeaderMap, host: &str) -> bool {
         // No `Origin` means no browser. `curl` and other clients send none, and
         // the API has no authentication for them to bypass.
         let Some(origin) = headers.get(header::ORIGIN) else {
@@ -320,6 +329,57 @@ pub async fn write_guard(
         })),
     )
         .into_response()
+}
+
+/// Refuses a request unless it comes from a page the policy trusts: the
+/// server's own, or one named with `--cors-origin`.
+///
+/// For the routes whose response must not reach another site even under
+/// `--cors-origin '*'`, which otherwise opens every read: the cook.md sign-in
+/// state, on `/api/sync/status` and the Preferences page. It carries the
+/// account's email and, while a login is pending, its device code. A page
+/// that reads the code can approve it with its own account first, and this
+/// server would then sync the user's recipes to that account.
+///
+/// A browser sends `Origin` on every cross-origin read, but not on a
+/// same-origin `GET` or a navigation, so the web UI, links from other sites
+/// and `curl` all pass. Writes need no such marker: [`write_guard`] already
+/// holds every route to the same rule, and `--no-csrf-check` lifts both.
+pub struct TrustedOrigin;
+
+impl FromRequestParts<Arc<AppState>> for TrustedOrigin {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let host = request_authority(&parts.headers, &parts.uri).unwrap_or_default();
+        if !state.csrf_check || state.cors.trusts_origin(&parts.headers, host) {
+            return Ok(Self);
+        }
+
+        // A nested router sees its path with the prefix stripped; log the one
+        // the client actually asked for.
+        let path = match parts.extensions.get::<OriginalUri>() {
+            Some(OriginalUri(uri)) => uri.path(),
+            None => parts.uri.path(),
+        };
+        tracing::warn!(
+            method = %parts.method,
+            path = %path,
+            "refused a cross-origin request for a same-origin-only route"
+        );
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "Cross-origin requests may not use this endpoint. Start the server \
+                          with --cors-origin <ORIGIN> to allow this origin, or \
+                          --no-csrf-check to disable this check."
+            })),
+        )
+            .into_response())
+    }
 }
 
 #[cfg(test)]
@@ -699,5 +759,62 @@ mod tests {
             &headers_with_origin("http://evil.test"),
             "a.test:9080"
         ));
+    }
+
+    #[test]
+    fn a_request_without_an_origin_is_trusted() {
+        // curl and every other non-browser client, whatever the policy.
+        for flags in [&[][..], &["*"][..]] {
+            let config = CorsConfig::from_args(&origins(flags), false).expect("valid");
+            assert!(config.trusts_origin(&HeaderMap::new(), "a.test:9080"));
+        }
+    }
+
+    #[test]
+    fn the_servers_own_origin_is_trusted() {
+        let config = CorsConfig::from_args(&[], false).expect("valid");
+        assert!(config.trusts_origin(&headers_with_origin("http://a.test:9080"), "a.test:9080"));
+    }
+
+    #[test]
+    fn no_other_origin_is_trusted_by_default() {
+        let config = CorsConfig::from_args(&[], false).expect("valid");
+        assert!(!config.trusts_origin(&headers_with_origin("http://evil.test"), "a.test:9080"));
+    }
+
+    #[test]
+    fn the_wildcard_trusts_no_other_origin() {
+        // `*` opens reads of recipe data to any page, not the routes behind
+        // `TrustedOrigin`: that is what keeps a pending cook.md login code
+        // from every site the user happens to have open.
+        let config = CorsConfig::from_args(&origins(&["*"]), false).expect("valid");
+        assert!(!config.trusts_origin(&headers_with_origin("http://evil.test"), "a.test:9080"));
+    }
+
+    #[test]
+    fn a_listed_origin_is_trusted() {
+        let config =
+            CorsConfig::from_args(&origins(&["http://app.test:3000"]), false).expect("valid");
+        assert!(config.trusts_origin(&headers_with_origin("http://app.test:3000"), "a.test:9080"));
+        assert!(!config.trusts_origin(&headers_with_origin("http://evil.test"), "a.test:9080"));
+    }
+
+    #[test]
+    fn an_opaque_origin_is_not_trusted() {
+        // Sandboxed iframes and `data:` or `file:` pages send `Origin: null`,
+        // which any page can arrange for itself.
+        let config = CorsConfig::from_args(&origins(&["*"]), false).expect("valid");
+        assert!(!config.trusts_origin(&headers_with_origin("null"), "a.test:9080"));
+    }
+
+    #[test]
+    fn an_origin_that_is_not_text_is_not_trusted() {
+        let config = CorsConfig::from_args(&[], false).expect("valid");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_bytes(b"http://\xffa.test").expect("valid header bytes"),
+        );
+        assert!(!config.trusts_origin(&headers, "a.test:9080"));
     }
 }

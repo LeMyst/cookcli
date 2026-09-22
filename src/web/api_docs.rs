@@ -56,11 +56,13 @@ pub fn preamble() -> ApiPreamble {
                 "CORS",
                 "No other origin is allowed by default, so a page on another site cannot read \
                  a response. `--cors-origin <ORIGIN>` lets that origin read and write; \
-                 `--cors-origin '*'` lets any origin read. A cross-origin request that would \
-                 modify recipes is refused with `403` unless the server was started with a \
-                 matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` \
-                 and other non-browser clients — are unaffected. `content-type` is always an \
-                 allowed request header.",
+                 `--cors-origin '*'` lets any origin read, except the cook.md sign-in state \
+                 (`/api/sync/status`), which answers a cross-origin request with `403` unless \
+                 its origin is named. A cross-origin request that would modify recipes is \
+                 refused with `403` unless the server was started with a matching \
+                 `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other \
+                 non-browser clients — are unaffected. `content-type` is always an allowed \
+                 request header.",
             ),
             note("Request size limit", "1 MB."),
             note(
@@ -80,8 +82,9 @@ pub fn preamble() -> ApiPreamble {
             ),
             note(
                 "403",
-                "a cross-origin request tried to modify recipes. Start the server with \
-                 `--cors-origin <ORIGIN>` to allow that origin.",
+                "a cross-origin request tried to modify recipes, or to read the cook.md \
+                 sign-in state. Start the server with `--cors-origin <ORIGIN>` to allow that \
+                 origin.",
             ),
             note(
                 "404",
@@ -1362,7 +1365,10 @@ fn sync() -> ApiSection {
                 "Current sync and login state",
                 "`pending_login` is non-null while a device-code login is in progress; poll \
                  this endpoint to detect completion. `expires_in_secs` counts down to when the \
-                 pending login expires. Captured live against a fresh server with no session.",
+                 pending login expires. A cross-origin request gets `403` unless its origin is \
+                 named with `--cors-origin`; `--cors-origin '*'` is not enough, because \
+                 another site that read the pending `user_code` could approve it with its own \
+                 account. Captured live against a fresh server with no session.",
             )
             .requires("sync")
             .response(

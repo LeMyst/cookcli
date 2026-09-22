@@ -28,7 +28,7 @@ cook server [OPTIONS] [BASE_PATH]
 | `--open` | Automatically open the web interface in your default browser |
 | `--cors-origin <ORIGIN>` | Origin allowed to make cross-origin browser requests. Repeatable. `*` lets any origin read, but not write. Default: none. |
 | `--cors-allow-credentials` | Allow cross-origin requests to carry cookies and credentials. Requires an explicit `--cors-origin`. |
-| `--no-csrf-check` | Disable same-origin enforcement on requests that modify recipes. |
+| `--no-csrf-check` | Disable same-origin enforcement on requests that modify recipes or read the cook.md sign-in state. |
 
 ## Examples
 
@@ -57,8 +57,9 @@ cook server --cors-origin https://cook.example.com
 - By default, only accepts connections from localhost
 - Use `--host` on trusted networks only — recipes become accessible to anyone on the network
 - By default no other website can use the server from your browser: responses carry no CORS headers, so a page on another origin cannot read them, and a cross-origin request that would modify recipes is refused with `403`. Naming origins with `--cors-origin` lets those origins read and write. `--cors-origin '*'` lets every website you visit read your recipes, pantry and shopping list, though not change them. Requests with no `Origin` header — `curl`, scripts, anything that is not a browser — are unaffected. See [the API reference](api.md).
+- The cook.md sign-in state — `/api/sync/status` and the Preferences page — only answers the server's own pages and origins named with `--cors-origin`, even under `--cors-origin '*'`. While you sign in it includes the pending login code, which another site could otherwise approve with its own account.
 - Behind a reverse proxy that rewrites `Host`, pass `--cors-origin` with the public origin (for example `--cors-origin https://cook.example.com`). The same-origin check reads the real `Host` header and ignores `X-Forwarded-Host`, which any client can set freely.
-- `--no-csrf-check` turns that same-origin enforcement off entirely, for both the API and the web UI's new-recipe form. Its former spelling, `--no-cors`, still works.
+- `--no-csrf-check` turns that same-origin enforcement off entirely, for the API, the web UI's new-recipe form and the sign-in state. Its former spelling, `--no-cors`, still works.
 - The web interface supports recipe browsing, scaling, search, and shopping list management
 - The UI language is negotiated per request from the browser's `Accept-Language` header — each visitor sees the interface in their own language (supported: `en-US`, `de-DE`, `nl-NL`, `fr-FR`, `es-ES`, `eu-ES`, `sv-SE`). For static sites, see the `--lang` flag of [`cook build web`](build.md#localization).
 - Mobile-friendly responsive layout
