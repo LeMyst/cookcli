@@ -19,6 +19,7 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
+use super::cors::TrustedOrigin;
 use super::AppState;
 
 /// Buffer size for LSP message channel.
@@ -27,7 +28,13 @@ use super::AppState;
 const LSP_MESSAGE_BUFFER_SIZE: usize = 32;
 
 /// WebSocket upgrade handler for LSP connections
+///
+/// CORS does not apply to websockets, so without [`TrustedOrigin`] any page
+/// could start a `cook lsp` process here and point it at a directory of its
+/// choosing. Browsers send `Origin` on every handshake, the editor's own
+/// included, and it is checked before the upgrade.
 pub async fn lsp_websocket(
+    _origin: TrustedOrigin,
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {

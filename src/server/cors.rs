@@ -335,16 +335,22 @@ pub async fn write_guard(
 /// server's own, or one named with `--cors-origin`.
 ///
 /// For the routes whose response must not reach another site even under
-/// `--cors-origin '*'`, which otherwise opens every read: the cook.md sign-in
-/// state, on `/api/sync/status` and the Preferences page. It carries the
-/// account's email and, while a login is pending, its device code. A page
-/// that reads the code can approve it with its own account first, and this
-/// server would then sync the user's recipes to that account.
+/// `--cors-origin '*'`, which otherwise opens every read:
 ///
-/// A browser sends `Origin` on every cross-origin read, but not on a
-/// same-origin `GET` or a navigation, so the web UI, links from other sites
-/// and `curl` all pass. Writes need no such marker: [`write_guard`] already
-/// holds every route to the same rule, and `--no-csrf-check` lifts both.
+/// - The cook.md sign-in state, on `/api/sync/status` and the Preferences
+///   page. It carries the account's email and, while a login is pending, its
+///   device code. A page that reads the code can approve it with its own
+///   account first, and this server would then sync the user's recipes to
+///   that account.
+/// - The LSP websocket. CORS does not govern websockets at all, so without
+///   this any page could start a `cook lsp` process and point it at a
+///   directory of its choosing.
+///
+/// A browser sends `Origin` on every cross-origin read and every websocket
+/// handshake, but not on a same-origin `GET` or a navigation, so the web UI,
+/// links from other sites and `curl` all pass. Writes need no such marker:
+/// [`write_guard`] already holds every route to the same rule, and
+/// `--no-csrf-check` lifts both.
 pub struct TrustedOrigin;
 
 impl FromRequestParts<Arc<AppState>> for TrustedOrigin {

@@ -230,6 +230,24 @@ async fn get_without_origin(server: &ServerGuard, path: &str) -> Response {
         .expect("GET request")
 }
 
+/// Starts a websocket handshake with the LSP bridge from `origin`, as a
+/// browser would, and returns its status: `101 Switching Protocols` when the
+/// upgrade goes through. The response is dropped straight away, which closes
+/// the socket and ends the `cook lsp` process an upgrade starts.
+async fn lsp_handshake(server: &ServerGuard, origin: &str) -> StatusCode {
+    Client::new()
+        .get(server.url("/api/ws/lsp"))
+        .header(ORIGIN, origin)
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .send()
+        .await
+        .expect("websocket handshake")
+        .status()
+}
+
 // ---------------------------------------------------------------------------
 // Preflight / header tests
 // ---------------------------------------------------------------------------
@@ -607,6 +625,28 @@ async fn no_csrf_check_lifts_the_same_origin_only_routes() {
         status,
         StatusCode::FORBIDDEN,
         "--no-csrf-check must lift TrustedOrigin along with the write guard, got {status}"
+    );
+}
+
+#[tokio::test]
+async fn lsp_websocket_checks_the_handshake_origin() {
+    // CORS does not apply to websockets, so this holds under the default
+    // policy too: nothing but the server's own check stops another site.
+    let server = start_server(&[]).await;
+
+    let foreign = lsp_handshake(&server, "http://evil.test").await;
+    assert_eq!(
+        foreign,
+        StatusCode::FORBIDDEN,
+        "another site must not open the LSP websocket, got {foreign}"
+    );
+
+    let own_origin = server.own_origin();
+    let own = lsp_handshake(&server, &own_origin).await;
+    assert_eq!(
+        own,
+        StatusCode::SWITCHING_PROTOCOLS,
+        "the editor's own handshake must still upgrade, got {own}"
     );
 }
 

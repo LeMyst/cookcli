@@ -57,8 +57,9 @@ pub fn preamble() -> ApiPreamble {
                 "No other origin is allowed by default, so a page on another site cannot read \
                  a response. `--cors-origin <ORIGIN>` lets that origin read and write; \
                  `--cors-origin '*'` lets any origin read, except the cook.md sign-in state \
-                 (`/api/sync/status`), which answers a cross-origin request with `403` unless \
-                 its origin is named. A cross-origin request that would modify recipes is \
+                 (`/api/sync/status`) and the LSP websocket, which answer a cross-origin \
+                 request with `403` unless its origin is named. A cross-origin request that \
+                 would modify recipes is \
                  refused with `403` unless the server was started with a matching \
                  `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other \
                  non-browser clients — are unaffected. `content-type` is always an allowed \
@@ -82,9 +83,9 @@ pub fn preamble() -> ApiPreamble {
             ),
             note(
                 "403",
-                "a cross-origin request tried to modify recipes, or to read the cook.md \
-                 sign-in state. Start the server with `--cors-origin <ORIGIN>` to allow that \
-                 origin.",
+                "a cross-origin request tried to modify recipes, read the cook.md sign-in \
+                 state, or open the LSP websocket. Start the server with \
+                 `--cors-origin <ORIGIN>` to allow that origin.",
             ),
             note(
                 "404",
@@ -1341,7 +1342,10 @@ data: {"file":"checked"}
                  subprocess, providing diagnostics and completions to the built-in editor. \
                  Messages are Language Server Protocol messages framed with `Content-Length` \
                  headers exactly as LSP over stdio would be — see the LSP specification for the \
-                 format. Not a REST endpoint and not usable with a plain HTTP client.",
+                 format. Not a REST endpoint and not usable with a plain HTTP client. CORS \
+                 does not apply to websockets, so the server checks the handshake's `Origin` \
+                 itself, which browsers always send: a handshake from another origin gets \
+                 `403` unless that origin is named with `--cors-origin`.",
             ),
         ],
     )

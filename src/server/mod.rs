@@ -103,9 +103,10 @@ pub struct ServerArgs {
     /// it, no other site can read from or write to the server. Named origins
     /// may read and write. "*" lets every site read your recipes, pantry and
     /// shopping list, but refuses cross-origin writes with 403, and still
-    /// keeps the cook.md sign-in state to named origins; it cannot be combined
-    /// with explicit origins. Requests with no Origin header -- curl and other
-    /// non-browser clients -- are never affected.
+    /// keeps the cook.md sign-in state and the editor's websocket to named
+    /// origins; it cannot be combined with explicit origins. Requests with no
+    /// Origin header -- curl and other non-browser clients -- are never
+    /// affected.
     #[arg(long, value_name = "ORIGIN")]
     cors_origin: Vec<String>,
 
@@ -116,13 +117,13 @@ pub struct ServerArgs {
     #[arg(long, default_value_t = false)]
     cors_allow_credentials: bool,
 
-    /// Disable same-origin enforcement on writes and on the sign-in state
+    /// Disable same-origin enforcement
     ///
-    /// By default a request that modifies recipes, or reads the cook.md
-    /// sign-in state, is rejected unless its Origin matches the Host it was
-    /// sent to or is named by --cors-origin. Use it only when a reverse proxy
-    /// rewrites Host in a way that cannot be expressed with --cors-origin. The
-    /// former spelling --no-cors still works.
+    /// By default a request that modifies recipes, reads the cook.md sign-in
+    /// state or opens the editor's websocket is rejected unless its Origin
+    /// matches the Host it was sent to or is named by --cors-origin. Use it
+    /// only when a reverse proxy rewrites Host in a way that cannot be
+    /// expressed with --cors-origin. The former spelling --no-cors still works.
     #[arg(long = "no-csrf-check", alias = "no-cors", action = clap::ArgAction::SetFalse)]
     csrf_check: bool,
 }

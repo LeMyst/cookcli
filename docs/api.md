@@ -8,7 +8,7 @@ Start the server with [`cook server`](server.md); every endpoint below is served
 
 - **Base URL:** `http://localhost:9080/api`
 - **Authentication:** None. Anyone who can reach the server can read and modify your recipes — think twice before using `--host` on an untrusted network.
-- **CORS:** No other origin is allowed by default, so a page on another site cannot read a response. `--cors-origin <ORIGIN>` lets that origin read and write; `--cors-origin '*'` lets any origin read, except the cook.md sign-in state (`/api/sync/status`), which answers a cross-origin request with `403` unless its origin is named. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
+- **CORS:** No other origin is allowed by default, so a page on another site cannot read a response. `--cors-origin <ORIGIN>` lets that origin read and write; `--cors-origin '*'` lets any origin read, except the cook.md sign-in state (`/api/sync/status`) and the LSP websocket, which answer a cross-origin request with `403` unless its origin is named. A cross-origin request that would modify recipes is refused with `403` unless the server was started with a matching `--cors-origin <ORIGIN>`. Requests with no `Origin` header — `curl` and other non-browser clients — are unaffected. `content-type` is always an allowed request header.
 - **Request size limit:** 1 MB.
 - **Content type:** JSON in and out, except where noted — raw recipe text is `text/plain`.
 
@@ -21,7 +21,7 @@ Every failure returns the same shape, with the status code carrying the meaning:
 ```
 
 - `400` — malformed input: an invalid path, a bad query parameter, or a recipe that failed to parse.
-- `403` — a cross-origin request tried to modify recipes, or to read the cook.md sign-in state. Start the server with `--cors-origin <ORIGIN>` to allow that origin.
+- `403` — a cross-origin request tried to modify recipes, read the cook.md sign-in state, or open the LSP websocket. Start the server with `--cors-origin <ORIGIN>` to allow that origin.
 - `404` — the recipe, menu, or pantry section does not exist, or no pantry file is configured.
 - `500` — the server could not read or write a file.
 
@@ -936,7 +936,7 @@ data: {"file":"checked"}
 
 Language server bridge (websocket)
 
-Upgrades to a websocket (verified: a plain WebSocket handshake against this path returns `101 Switching Protocols`) that bridges to a `cook lsp` subprocess, providing diagnostics and completions to the built-in editor. Messages are Language Server Protocol messages framed with `Content-Length` headers exactly as LSP over stdio would be — see the LSP specification for the format. Not a REST endpoint and not usable with a plain HTTP client.
+Upgrades to a websocket (verified: a plain WebSocket handshake against this path returns `101 Switching Protocols`) that bridges to a `cook lsp` subprocess, providing diagnostics and completions to the built-in editor. Messages are Language Server Protocol messages framed with `Content-Length` headers exactly as LSP over stdio would be — see the LSP specification for the format. Not a REST endpoint and not usable with a plain HTTP client. CORS does not apply to websockets, so the server checks the handshake's `Origin` itself, which browsers always send: a handshake from another origin gets `403` unless that origin is named with `--cors-origin`.
 
 ## Sync
 
