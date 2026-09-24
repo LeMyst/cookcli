@@ -9,7 +9,7 @@ use crate::util::menu_scale::{ref_info_or_default, reference_scale_factor, Recip
 use crate::web::language::FeatureFlags;
 use crate::web::templates::*;
 use anyhow::Result;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use fluent_templates::Loader;
 use unic_langid::LanguageIdentifier;
 
@@ -74,23 +74,10 @@ pub fn build_recipes_template(input: RecipesBuildInput<'_>) -> Result<RecipesTem
         // Extract tags, image, is_menu, and file timestamps if this is a recipe
         let (tags, image_path, is_menu, modified_at, created_at) =
             if let Some(ref recipe) = child.recipe {
-                let img_path = recipe.title_image().clone().and_then(|img| {
-                    if img.starts_with("http://") || img.starts_with("https://") {
-                        Some(img)
-                    } else {
-                        // Make path relative to base and accessible via /api/static
-                        let img_path = camino::Utf8Path::new(&img);
-                        if let Ok(relative) = img_path.strip_prefix(base_path) {
-                            Some(format!("{url_prefix}/api/static/{relative}"))
-                        } else if !img_path.is_absolute() {
-                            Some(format!("{url_prefix}/api/static/{img_path}"))
-                        } else {
-                            img_path
-                                .file_name()
-                                .map(|name| format!("{url_prefix}/api/static/{name}"))
-                        }
-                    }
-                });
+                let img_path = recipe
+                    .title_image()
+                    .clone()
+                    .and_then(|img| get_image_path(base_path, url_prefix, img));
 
                 let (modified_at, created_at) = recipe
                     .path()
@@ -900,22 +887,10 @@ fn build_menu_template_inner(
         std::collections::HashMap::new();
 
     // Get the image path if available
-    let image_path = entry.title_image().clone().and_then(|img_path| {
-        if img_path.starts_with("http://") || img_path.starts_with("https://") {
-            Some(img_path)
-        } else {
-            let img_path = camino::Utf8Path::new(&img_path);
-            if let Ok(relative) = img_path.strip_prefix(base_path) {
-                Some(format!("{url_prefix}/api/static/{relative}"))
-            } else if !img_path.is_absolute() {
-                Some(format!("{url_prefix}/api/static/{img_path}"))
-            } else {
-                img_path
-                    .file_name()
-                    .map(|name| format!("{url_prefix}/api/static/{name}"))
-            }
-        }
-    });
+    let image_path = entry
+        .title_image()
+        .clone()
+        .and_then(|img_path| get_image_path(base_path, url_prefix, img_path));
 
     let breadcrumbs: Vec<String> = path.split('/').map(|s| s.to_string()).collect();
 
@@ -1160,7 +1135,13 @@ fn count_recipes_tree(tree: &cooklang_find::RecipeTree) -> Option<usize> {
     Some(count)
 }
 
-fn get_image_path(base_path: &Utf8Path, prefix: &str, img_path: String) -> Option<String> {
+/// URL under `{prefix}/api/static/` for a recipe or step image, or the value
+/// itself when it is already an `http(s)://` URL.
+pub(crate) fn get_image_path(
+    base_path: &Utf8Path,
+    prefix: &str,
+    img_path: String,
+) -> Option<String> {
     tracing::debug!("Recipe image path from entry: {}", img_path);
     // If it's a URL, use it directly
     if img_path.starts_with("http://") || img_path.starts_with("https://") {
@@ -1171,17 +1152,33 @@ fn get_image_path(base_path: &Utf8Path, prefix: &str, img_path: String) -> Optio
 
         // Try to strip the base_path prefix to get a relative path
         if let Ok(relative) = img_path.strip_prefix(base_path) {
-            let result = format!("{prefix}/api/static/{relative}");
+            let result = format!("{prefix}/api/static/{}", url_path(relative));
             tracing::debug!("Image path relative to base: {}", result);
             Some(result)
         } else if !img_path.is_absolute() {
-            Some(format!("{prefix}/api/static/{img_path}"))
+            Some(format!("{prefix}/api/static/{}", url_path(img_path)))
         } else {
             img_path
                 .file_name()
                 .map(|name| format!("{prefix}/api/static/{name}"))
         }
     }
+}
+
+/// A relative path's components joined with `/`.
+///
+/// `Display` keeps the platform separator, so on Windows a picture in
+/// `Breakfast/` came out as `Breakfast\Easy Pancakes.jpg`. Browsers read `\`
+/// as `/` and still found the file, but the URL differed from every other
+/// platform's. A root or drive prefix is dropped: Windows counts `\x` and
+/// `C:x` as relative, and neither belongs in a URL path. Segments are not
+/// percent-encoded; spaces stay as they are.
+fn url_path(path: &Utf8Path) -> String {
+    path.components()
+        .filter(|c| !matches!(c, Utf8Component::Prefix(_) | Utf8Component::RootDir))
+        .map(|c| c.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 #[cfg(test)]
@@ -1273,5 +1270,40 @@ mod natural_sort_tests {
         });
         let order: Vec<_> = items.iter().map(|i| i.name).collect();
         assert_eq!(order, vec!["breakfast", "Soups", "Apple pie", "zucchini"]);
+    }
+}
+
+#[cfg(test)]
+mod image_path_tests {
+    use super::get_image_path;
+    use camino::Utf8PathBuf;
+
+    /// `Utf8PathBuf::join` inserts `\` on Windows; the URL must not.
+    #[test]
+    fn nested_image_url_uses_forward_slashes() {
+        let base = Utf8PathBuf::from("recipes");
+        let image = base.join("Breakfast").join("Easy Pancakes.3.jpg");
+        assert_eq!(
+            get_image_path(&base, "/cook", image.into_string()).as_deref(),
+            Some("/cook/api/static/Breakfast/Easy Pancakes.3.jpg")
+        );
+    }
+
+    #[test]
+    fn relative_image_outside_base_uses_forward_slashes() {
+        let image = Utf8PathBuf::from("Breakfast").join("Easy Pancakes.jpg");
+        assert_eq!(
+            get_image_path(&Utf8PathBuf::from("elsewhere"), "", image.into_string()).as_deref(),
+            Some("/api/static/Breakfast/Easy Pancakes.jpg")
+        );
+    }
+
+    #[test]
+    fn remote_image_is_kept_as_is() {
+        let url = "https://example.com/a b.jpg".to_string();
+        assert_eq!(
+            get_image_path(&Utf8PathBuf::from("recipes"), "/cook", url.clone()),
+            Some(url)
+        );
     }
 }

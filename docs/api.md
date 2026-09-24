@@ -86,7 +86,7 @@ Response:
 
 Read one parsed recipe
 
-Parses the recipe and returns its ingredients, cookware, timers and steps. `grouped_ingredients` aggregates repeated ingredients and indexes back into `ingredients`. `inline_quantities` is also present alongside them at the top level of `recipe`. The `image` field is a URL under `/api/static/` when the recipe has a title image, otherwise null. Frontmatter lands under `metadata.map` with the types it was written in, except `tags`, which is always an array of strings — `tags: breakfast, quick` is split on commas into the same array as `tags: [breakfast, quick]`.
+Parses the recipe and returns its ingredients, cookware, timers and steps. `grouped_ingredients` aggregates repeated ingredients and indexes back into `ingredients`. `inline_quantities` is also present alongside them at the top level of `recipe`. The `image` field is a URL under `/api/static/`, after the server's `--url-prefix` if one is set, when the recipe has a title image, otherwise null. Frontmatter lands under `metadata.map` with the types it was written in, except `tags`, which is always an array of strings — `tags: breakfast, quick` is split on commas into the same array as `tags: [breakfast, quick]`.
 
 | Name | In | Type | Required | Description |
 |------|----|------|----------|-------------|
