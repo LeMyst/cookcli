@@ -68,6 +68,45 @@ pub struct PlanView {
     pub weeks: Vec<Vec<Option<PlanDay>>>,
     /// Sections with no date, or a date the plan does not cover.
     pub outside: Vec<MenuSection>,
+    /// Set by the server when the viewer may change the plan from the page.
+    pub edit: Option<PlanEdit>,
+}
+
+/// What the calendar needs to change the plan from the page.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PlanEdit {
+    /// The plan's path in the collection, with `.menu`.
+    pub path: String,
+    /// A hash of the text the page shows, sent back with every change so one
+    /// meant for an older text is refused.
+    pub version: String,
+    /// The plan's `servings`, which a recipe added from the page is given.
+    pub servings: Option<String>,
+    /// Every meal a line can be moved or copied to.
+    pub meals: Vec<String>,
+    /// The file's lines for each day's meal, keyed `YYYY-MM-DD|Meal`. Only
+    /// meals whose lines match the card's one for one are here, so a line
+    /// on the page is always the line a change reaches.
+    pub items: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl PlanEdit {
+    /// The file's lines for `meal` on `date`, when the card may change them.
+    pub fn items(&self, date: &str, meal: &str) -> Option<&Vec<String>> {
+        self.items.get(&format!("{date}|{meal}"))
+    }
+}
+
+impl PlanView {
+    /// The file's text of line `index` of `meal` on `date`, when the page may
+    /// change that line.
+    pub fn line_text(&self, date: &str, meal: Option<&str>, index: &usize) -> Option<&str> {
+        self.edit
+            .as_ref()?
+            .items(date, meal?)?
+            .get(*index)
+            .map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +195,7 @@ pub fn build_plan_view(
         weekdays,
         weeks,
         outside,
+        edit: None,
     }
 }
 
@@ -233,7 +273,7 @@ fn tidy(line: &[MenuSectionItem]) -> Vec<MenuSectionItem> {
 /// The section heading a new plan gives `date`: `Thursday (2026-10-01)`, the
 /// weekday in the page's language, as the editor toolbar writes it.
 #[cfg(feature = "server")]
-fn day_heading(date: NaiveDate, lang: &LanguageIdentifier) -> String {
+pub(crate) fn day_heading(date: NaiveDate, lang: &LanguageIdentifier) -> String {
     let weekday = date.format_localized("%A", chrono_locale(lang)).to_string();
     format!("{} ({})", capitalize(&weekday), date.format("%Y-%m-%d"))
 }

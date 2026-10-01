@@ -293,6 +293,12 @@ Dinner: \
 - What is eaten each day stays in the body, in sections dated `(YYYY-MM-DD)` like any menu, so the shopping list, the Today's menu banner, `cook shopping-list` and other Cooklang apps read a plan as they read any menu. A new plan has a section for every day, with an empty bullet under each meal to fill in the editor; day and meal names are written in the page's language.
 - A menu with a `plan:` block shows as one card a day, in weekday columns on a wide screen (weeks start on Sunday for `en-US` and `ja-JP`, Monday otherwise) and one under the other on a phone. Each meal of `meals` gets a slot even when nothing is planned; a meal the text adds (`Snacks:`) is shown after them. The reader's own clock marks today and greys the days gone by.
 - A section with no date, or a date outside the plan, is listed under **Outside this plan**. A `plan:` block that cannot be laid out — no valid `start`, or `days` out of range — leaves the menu shown as an ordinary menu.
+- Those who may edit recipes can change a plan from its calendar:
+  - **+** beside a meal opens the recipe picker and adds the recipe at the end of that meal, as `- @./Folder/Recipe{2%servings}` (servings start at the plan's own). A missing day or meal is written for it: days in date order, meals in the order of the plan's `meals`.
+  - **⋯** beside a line opens **Move to…**, **Copy to…** and **Remove**. Move and Copy ask for a day and a meal. A line can also be dragged onto another meal; holding Alt, Ctrl or ⌘ copies it instead.
+  - Only the lines concerned change: comments, notes and the rest of the file are left as they are. Removing a meal's only line leaves an empty bullet, so the meal keeps its slot.
+  - The page reloads after each change. If the plan was changed elsewhere since the page was loaded (in the editor, another tab, or on disk), the change is refused and the page asks for a reload, rather than overwrite it.
+  - A meal whose lines the calendar cannot match one for one with the file, such as one with free text between bullets, can still be added to, but its lines are only changed in the editor. The calendar uses [`POST /api/plans/{*path}`](api.md).
 
 ## Web feeds
 
