@@ -55,7 +55,8 @@ fn collect(tree: &cooklang_find::RecipeTree, prefix: String, out: &mut Vec<Searc
                 }
             };
             out.push(SearchEntry {
-                title: name.clone(),
+                // The node's name, not the key: `Pasta`, not `Pasta.menu`.
+                title: child.name.clone(),
                 path: url_path,
                 tags,
                 ingredients,

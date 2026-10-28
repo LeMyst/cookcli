@@ -185,4 +185,16 @@ fn the_static_site_writes_a_page_for_both_entries_of_a_shared_name() {
     assert!(read("menu/Plans/Week.html").contains("Dinner"));
     assert!(read("menu/Plans/Week/Monday.html").contains("Breakfast"));
     assert!(read("directory/Plans/Week.html").contains("Monday"));
+
+    // Search finds both, each under its own name and page.
+    let index = read("static/search-index.js");
+    assert!(
+        index.contains(r#""title":"Pasta","path":"recipe/Pasta.html""#),
+        "{index}"
+    );
+    assert!(
+        index.contains(r#""title":"Pasta","path":"menu/Pasta.html""#),
+        "{index}"
+    );
+    assert!(!index.contains("Pasta.menu"), "{index}");
 }
