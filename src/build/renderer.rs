@@ -99,8 +99,14 @@ pub fn render_recipe(
         url_prefix: &prefix,
         // Pass the extension-less path so template URLs (e.g. the .cook
         // download link) match the server convention without doubling the
-        // extension.
-        recipe_path: trimmed,
+        // extension. A menu keeps its own, as the server's `/recipe/X.menu`
+        // does: without it a recipe of the same name (`Pasta.cook` beside
+        // `Pasta.menu`) answers, and the menu's page is never written.
+        recipe_path: if recipe_relpath.ends_with(".menu") {
+            recipe_relpath
+        } else {
+            trimmed
+        },
         aisle_path,
         scale: 1.0,
         servings: None,

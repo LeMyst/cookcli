@@ -92,12 +92,21 @@ pub fn build_recipes_template(input: RecipesBuildInput<'_>) -> Result<RecipesTem
 
     for (name, child) in &tree.children {
         let is_dir = !child.children.is_empty();
+        // A folder can hold two entries of one name (`Pasta.cook` and
+        // `Pasta.menu`, or the folder `Week/` and `Week.menu`): the tree keys
+        // the second by its file name. On the server both recipes would be
+        // `/recipe/Pasta`, which opens the `.cook`, so that one keeps its
+        // extension. The static site files menus apart (`menu/Pasta.html`).
+        let shares_name = name != &child.name && !static_mode;
         let item_path = {
             let url_path = child
                 .recipe
                 .as_ref()
                 .and_then(|recipe| recipe.file_name())
                 .map(|f| {
+                    if shares_name {
+                        return f;
+                    }
                     f.trim_end_matches(".cook")
                         .trim_end_matches(".menu")
                         .to_string()
@@ -148,7 +157,8 @@ pub fn build_recipes_template(input: RecipesBuildInput<'_>) -> Result<RecipesTem
             };
 
         items.push(RecipeItem {
-            name: name.to_string(),
+            // The node's name, not the key: `Pasta`, not `Pasta.menu`.
+            name: child.name.clone(),
             path: item_path,
             is_directory: is_dir,
             count: if is_dir {
@@ -1090,7 +1100,13 @@ fn build_menu_template_inner(
         .clone()
         .and_then(|img_path| get_image_path(base_path, url_prefix, img_path));
 
-    let breadcrumbs: Vec<String> = path.split('/').map(|s| s.to_string()).collect();
+    // A menu linked from another, or sharing its name with a recipe, is asked
+    // for as `Week.menu`; its crumb is still `Week`.
+    let breadcrumbs: Vec<String> = path
+        .trim_end_matches(".menu")
+        .split('/')
+        .map(|s| s.to_string())
+        .collect();
 
     // Parse sections and content
     let mut sections = Vec::new();
